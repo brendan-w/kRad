@@ -36,7 +36,7 @@ static struct timespec t;
 static int geiger_data_read(struct hwrng* rng, u32 *data)
 {
 	*data = (u32) t.tv_nsec;
-	return 1;
+	return 4;
 }
 
 /*
