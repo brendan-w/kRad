@@ -22,6 +22,12 @@
 #include <linux/interrupt.h> 
 #include <linux/time.h>
 #include <linux/hw_random.h>
+#include <linux/mutex.h>
+
+
+//the number of pulses to record
+#define PULSE_BUFFER_SIZE 50
+
 
 /* Define a GPIO for the Geiger counter */
 static int geiger_pulse_pin = 17; // listens for incoming pulses from the gieger counter
@@ -29,14 +35,70 @@ static int geiger_pulse_pin = 17; // listens for incoming pulses from the gieger
 /* Later on, the assigned IRQ numbers for the buttons are stored here */
 static int geiger_irq = -1;
 
-/* The last time of a click */
-static struct timespec t;
+/* circular buffer of random pulse times */
+DEFINE_MUTEX(pulses_lock);
+static struct timespec pulses[PULSE_BUFFER_SIZE];
+static int pulses_head = 0;
+static int pulses_tail = 0;
 
+
+/*
+	buffer functions
+	NOTE: acquire the pulses_lock before using these functions
+	NOTE: it is up to you to check that you don't overfill the buffer
+*/
+static int pulses_size(void)
+{
+	if(pulses_head == pulses_tail)
+		return 0;
+	else if(pulses_head < pulses_tail)
+		return pulses_tail - pulses_head + 1;
+	else //if(pulses_head > pulses_tail)
+		return (PULSE_BUFFER_SIZE - pulses_head) + pulses_tail + 1;
+}
+
+//pops an element from the head (front) of the buffer
+static struct timespec pulses_pop(void)
+{
+	int head = pulses_head;
+	++pulses_head;
+	pulses_head = pulses_head % PULSE_BUFFER_SIZE;
+	return pulses[head];
+}
+
+//pushes an element onto the tail (back) of the buffer
+static void pulses_push(struct timespec t)
+{
+	++pulses_tail;
+	pulses_tail = pulses_tail % PULSE_BUFFER_SIZE;
+	pulses[pulses_tail] = t;
+}
+
+/*
+	end buffer functions
+*/
+
+
+static int geiger_data_present(struct hwrng* rng, int wait)
+{
+	int bytes = 0;
+	mutex_lock(&pulses_lock);
+	bytes = pulses_size() * sizeof(struct timespec);
+	mutex_unlock(&pulses_lock);
+	return bytes;
+}
 
 static int geiger_data_read(struct hwrng* rng, u32 *data)
 {
-	*data = (u32) t.tv_nsec;
-	return 4;
+	int bytes = 0;
+	mutex_lock(&pulses_lock);
+	if(pulses_size() > 0)
+	{
+		*data = (u32) pulses_pop().tv_nsec;
+		bytes = 4;
+	}
+	mutex_unlock(&pulses_lock);
+	return bytes;
 }
 
 /*
@@ -50,7 +112,7 @@ static struct hwrng geiger_rng = {
 	"Geiger Counter",
 	NULL,
 	NULL,
-	NULL,
+	geiger_data_present,
 	geiger_data_read,
 	//geiger_read,
 	NULL,
@@ -66,8 +128,10 @@ static irqreturn_t geiger_isr(int irq, void *data)
 {
 	if(irq == geiger_irq)
 	{
-		t = CURRENT_TIME;
-		//printk(KERN_INFO "pulse %ld", (long)t.tv_nsec);
+		mutex_lock(&pulses_lock);
+		if(pulses_size() < PULSE_BUFFER_SIZE)
+			pulses_push(CURRENT_TIME);
+		mutex_unlock(&pulses_lock);
 	}
 
 	return IRQ_HANDLED;
@@ -119,16 +183,17 @@ static int __init krad_init(void)
 
 	printk(KERN_INFO "Successfully registered new hardware RNG device\n");
 
+	// finished successfully
 	return 0;
 
-// cleanup what has been setup so far
 
+	// failure cases
 fail3:
 	free_irq(geiger_irq, NULL);
 fail2: 
 	gpio_free(geiger_pulse_pin);
 fail1:
-	return ret;	
+	return ret;
 }
 
 /**
