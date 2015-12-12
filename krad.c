@@ -88,6 +88,7 @@ static int geiger_data_present(struct hwrng* rng, int wait)
 	return bytes;
 }
 
+//the old hwrng API
 static int geiger_data_read(struct hwrng* rng, u32 *data)
 {
 	int bytes = 0;
@@ -101,12 +102,45 @@ static int geiger_data_read(struct hwrng* rng, u32 *data)
 	return bytes;
 }
 
-/*
+//the new hwrng API
 static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
 {
-	return 0;
+	int bytes = 0;
+	mutex_lock(&pulses_lock);
+
+	//ensure that we have new data to give
+	if(pulses_size() > 0)
+	{
+		if(max > sizeof(struct timespec))
+		{
+			//how many entries can we give
+			int bytes_available = pulses_size() * sizeof(struct timespec);
+			int max_bytes = min((int) max, bytes_available);
+			int max_pulses = max_bytes / sizeof(struct timespec); //integer flooring
+
+			struct timespec* output = (struct timespec*) data;
+
+			//give them as much as we can
+			while(max_pulses > 0)
+			{
+				*output = pulses_pop();
+				++output;
+				--max_pulses;
+			}
+
+			bytes = max_bytes;
+		}
+		else
+		{
+			//else, no implementation for smaller amounts
+			printk(KERN_INFO "%s was called with max bytes smaller than the storage type\n", __func__);
+		}
+	}
+
+	mutex_unlock(&pulses_lock);
+	return bytes;
 }
-*/
+
 
 static struct hwrng geiger_rng = {
 	"Geiger Counter",
@@ -114,8 +148,7 @@ static struct hwrng geiger_rng = {
 	NULL,
 	geiger_data_present,
 	geiger_data_read,
-	//geiger_read,
-	NULL,
+	geiger_read,
 	0,
 	1
 };
@@ -128,6 +161,7 @@ static irqreturn_t geiger_isr(int irq, void *data)
 {
 	if(irq == geiger_irq)
 	{
+		//TODO: mutex_try_unlock, instead?
 		mutex_lock(&pulses_lock);
 		if(pulses_size() < PULSE_BUFFER_SIZE)
 			pulses_push(CURRENT_TIME);
