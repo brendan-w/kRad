@@ -22,7 +22,7 @@
 #include <linux/interrupt.h> 
 #include <linux/time.h>
 #include <linux/hw_random.h>
-#include <linux/mutex.h>
+#include <linux/spinlock.h>
 
 
 //the number of pulses to record
@@ -36,7 +36,7 @@ static int geiger_pulse_pin = 17; // listens for incoming pulses from the gieger
 static int geiger_irq = -1;
 
 /* circular buffer of random pulse times */
-DEFINE_MUTEX(pulses_lock);
+DEFINE_SPINLOCK(pulses_lock);
 static struct timespec pulses[PULSE_BUFFER_SIZE];
 static int pulses_head = 0;
 static int pulses_tail = 0;
@@ -82,9 +82,9 @@ static void pulses_push(struct timespec t)
 static int geiger_data_present(struct hwrng* rng, int wait)
 {
 	int bytes = 0;
-	mutex_lock(&pulses_lock);
+	spin_lock(&pulses_lock);
 	bytes = pulses_size() * sizeof(struct timespec);
-	mutex_unlock(&pulses_lock);
+	spin_unlock(&pulses_lock);
 	return bytes;
 }
 
@@ -92,13 +92,13 @@ static int geiger_data_present(struct hwrng* rng, int wait)
 static int geiger_data_read(struct hwrng* rng, u32 *data)
 {
 	int bytes = 0;
-	mutex_lock(&pulses_lock);
+	spin_lock(&pulses_lock);
 	if(pulses_size() > 0)
 	{
 		*data = (u32) pulses_pop().tv_nsec;
 		bytes = 4;
 	}
-	mutex_unlock(&pulses_lock);
+	spin_unlock(&pulses_lock);
 	return bytes;
 }
 
@@ -106,7 +106,7 @@ static int geiger_data_read(struct hwrng* rng, u32 *data)
 static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
 {
 	int bytes = 0;
-	mutex_lock(&pulses_lock);
+	spin_lock(&pulses_lock);
 
 	//ensure that we have new data to give
 	if(pulses_size() > 0)
@@ -137,7 +137,7 @@ static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
 		}
 	}
 
-	mutex_unlock(&pulses_lock);
+	spin_unlock(&pulses_lock);
 	return bytes;
 }
 
@@ -161,11 +161,11 @@ static irqreturn_t geiger_isr(int irq, void *data)
 {
 	if(irq == geiger_irq)
 	{
-		//TODO: mutex_try_unlock, instead?
-		mutex_lock(&pulses_lock);
+		//TODO: spin_try_unlock, instead?
+		spin_lock(&pulses_lock);
 		if(pulses_size() < PULSE_BUFFER_SIZE)
 			pulses_push(CURRENT_TIME);
-		mutex_unlock(&pulses_lock);
+		spin_unlock(&pulses_lock);
 	}
 
 	return IRQ_HANDLED;
