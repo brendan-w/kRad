@@ -149,8 +149,8 @@ static void __exit krad_exit(void)
 }
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Stefan Wendler");
-MODULE_DESCRIPTION("Basic Linux Kernel module using GPIO interrupts");
+MODULE_AUTHOR("Brendan Whitfield");
+MODULE_DESCRIPTION("Module for using a geiger counter as a hardware RNG");
 
 module_init(krad_init);
 module_exit(krad_exit);
