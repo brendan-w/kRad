@@ -150,7 +150,7 @@ static struct hwrng geiger_rng = {
 	geiger_data_read,
 	geiger_read,
 	0,
-	1
+	32
 };
 
 
