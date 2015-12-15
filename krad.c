@@ -1,5 +1,5 @@
 /*
- * Basic Linux Kernel module using GPIO interrupts.
+ * Experimental module for using a geiger counter as a hardware RNG
  *
  * Author:
  * 	Stefan Wendler (devnull@kaltpost.de)
