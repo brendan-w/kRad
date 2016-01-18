@@ -32,7 +32,7 @@
 /* Define a GPIO for the Geiger counter */
 static int geiger_pulse_pin = 17; // listens for incoming pulses from the gieger counter
 
-/* Later on, the assigned IRQ numbers for the buttons are stored here */
+/* the assigned IRQ for the geiger pulse pin */
 static int geiger_irq = -1;
 
 /* circular buffer of random pulse times */
