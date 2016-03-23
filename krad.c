@@ -30,12 +30,15 @@
 
 
 /* Define a GPIO for the Geiger counter */
-static int geiger_pulse_pin = 17; // listens for incoming pulses from the gieger counter
+static int geiger_pulse_pin = 17;
 
 /* the assigned IRQ for the geiger pulse pin */
 static int geiger_irq = -1;
 
-/* circular buffer of random pulse times */
+/*
+  circular buffer of random pulse times
+  TODO: should probably just allocate my own page for this
+*/
 DEFINE_SPINLOCK(pulses_lock);
 static struct timespec pulses[PULSE_BUFFER_SIZE];
 static int pulses_head = 0;
@@ -187,8 +190,6 @@ static int __init krad_init(void)
 		printk(KERN_ERR "Unable to request GPIO for the Geiger Counter: %d\n", ret);
 		goto fail1;
 	}
-
-	//printk(KERN_INFO "Current button1 value: %d\n", gpio_get_value(buttons[0].gpio));
 	
 	ret = gpio_to_irq(geiger_pulse_pin);
 
@@ -253,5 +254,3 @@ MODULE_DESCRIPTION("Module for using a geiger counter as a hardware RNG");
 
 module_init(krad_init);
 module_exit(krad_exit);
-
-
