@@ -42,43 +42,6 @@ DEFINE_SPINLOCK(consumer_lock); //lock for hwrng API...
 
 
 
-/*
-	buffer functions
-	NOTE: acquire the pulses_lock before using these functions
-	NOTE: it is up to you to check that you don't overfill the buffer
-*/
-static int pulses_size(void)
-{
-	if(pulses_head == pulses_tail)
-		return 0;
-	else if(pulses_head < pulses_tail)
-		return pulses_tail - pulses_head + 1;
-	else //if(pulses_head > pulses_tail)
-		return (BUFFER_SIZE - pulses_head) + pulses_tail + 1;
-}
-
-//pops an element from the head (front) of the buffer
-static struct timespec pulses_pop(void)
-{
-	int head = pulses_head;
-	++pulses_head;
-	pulses_head = pulses_head % BUFFER_SIZE;
-	return buffer[head];
-}
-
-//pushes an element onto the tail (back) of the buffer
-static void pulses_push(struct timespec t)
-{
-	++pulses_tail;
-	pulses_tail = pulses_tail % BUFFER_SIZE;
-	buffer[pulses_tail] = t;
-}
-
-/*
-	end buffer functions
-*/
-
-
 static int geiger_data_present(struct hwrng* rng, int wait)
 {
 	int bytes = 0;
