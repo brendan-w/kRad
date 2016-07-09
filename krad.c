@@ -2,8 +2,8 @@
  * Experimental module for using a geiger counter as a hardware RNG
  *
  * Author:
- * 	Stefan Wendler (devnull@kaltpost.de)
- *      Brendan Whitfield (bcw7044@rit.edu)
+ *      Stefan Wendler (devnull@kaltpost.de)
+ *      Brendan Whitfield (me@brendan-w.com)
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -19,7 +19,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/gpio.h>
-#include <linux/interrupt.h> 
+#include <linux/interrupt.h>
 #include <linux/time.h>
 #include <linux/hw_random.h>
 #include <linux/spinlock.h>
@@ -31,14 +31,9 @@ static int geiger_pulse_pin = 3;
 /* the assigned IRQ for the geiger pulse pin */
 static int geiger_irq = -1;
 
-
+//circular buffer of random pulse times
 #define BUFFER_SIZE (PAGE_SIZE / sizeof(struct timespec))
 static struct timespec* buffer;
-
-/*
-  circular buffer of random pulse times
-  TODO: should probably just allocate my own page for this
-*/
 DEFINE_SPINLOCK(pulses_lock);
 static int pulses_head = 0;
 static int pulses_tail = 0;
