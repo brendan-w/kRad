@@ -23,24 +23,23 @@
 #include <linux/time.h>
 #include <linux/hw_random.h>
 #include <linux/spinlock.h>
-
-
-//the number of pulses to record
-#define PULSE_BUFFER_SIZE 50
-
+#include <linux/gfp.h>
 
 /* Define a GPIO for the Geiger counter */
-static int geiger_pulse_pin = 17;
+static int geiger_pulse_pin = 3;
 
 /* the assigned IRQ for the geiger pulse pin */
 static int geiger_irq = -1;
+
+
+#define BUFFER_SIZE (PAGE_SIZE / sizeof(struct timespec))
+static struct timespec* buffer;
 
 /*
   circular buffer of random pulse times
   TODO: should probably just allocate my own page for this
 */
 DEFINE_SPINLOCK(pulses_lock);
-static struct timespec pulses[PULSE_BUFFER_SIZE];
 static int pulses_head = 0;
 static int pulses_tail = 0;
 
@@ -57,7 +56,7 @@ static int pulses_size(void)
 	else if(pulses_head < pulses_tail)
 		return pulses_tail - pulses_head + 1;
 	else //if(pulses_head > pulses_tail)
-		return (PULSE_BUFFER_SIZE - pulses_head) + pulses_tail + 1;
+		return (BUFFER_SIZE - pulses_head) + pulses_tail + 1;
 }
 
 //pops an element from the head (front) of the buffer
@@ -65,16 +64,16 @@ static struct timespec pulses_pop(void)
 {
 	int head = pulses_head;
 	++pulses_head;
-	pulses_head = pulses_head % PULSE_BUFFER_SIZE;
-	return pulses[head];
+	pulses_head = pulses_head % BUFFER_SIZE;
+	return buffer[head];
 }
 
 //pushes an element onto the tail (back) of the buffer
 static void pulses_push(struct timespec t)
 {
 	++pulses_tail;
-	pulses_tail = pulses_tail % PULSE_BUFFER_SIZE;
-	pulses[pulses_tail] = t;
+	pulses_tail = pulses_tail % BUFFER_SIZE;
+	buffer[pulses_tail] = t;
 }
 
 /*
@@ -164,9 +163,11 @@ static irqreturn_t geiger_isr(int irq, void *data)
 {
 	if(irq == geiger_irq)
 	{
+		struct timespec t = CURRENT_TIME;
+		printk(KERN_INFO "Geiger %ld seconds %ld nanoseconds \n", t.tv_sec, t.tv_nsec);
 		//TODO: spin_try_unlock, instead?
 		spin_lock(&pulses_lock);
-		if(pulses_size() < PULSE_BUFFER_SIZE)
+		if(pulses_size() < BUFFER_SIZE)
 			pulses_push(CURRENT_TIME);
 		spin_unlock(&pulses_lock);
 	}
@@ -183,17 +184,30 @@ static int __init krad_init(void)
 
 	printk(KERN_INFO "%s\n", __func__);
 
+	//allocate a single page for our circular buffer
+	buffer = (struct timespec*) __get_free_page(GFP_KERNEL);
+
+	if(!buffer)
+	{
+		printk(KERN_ERR "Not enough memory for buffer\n");
+		return ENOMEM;
+	}
+
+	printk(KERN_INFO "Allocated buffer for %lu pulses\n", BUFFER_SIZE);
+
 	// register Geiger pulse gpio
 	ret = gpio_request_one(geiger_pulse_pin, GPIOF_IN, "Geiger Pulse");
 
-	if (ret) {
+	if(ret)
+	{
 		printk(KERN_ERR "Unable to request GPIO for the Geiger Counter: %d\n", ret);
 		goto fail1;
 	}
 	
 	ret = gpio_to_irq(geiger_pulse_pin);
 
-	if(ret < 0) {
+	if(ret < 0)
+	{
 		printk(KERN_ERR "Unable to request IRQ: %d\n", ret);
 		goto fail2;
 	}
@@ -204,14 +218,16 @@ static int __init krad_init(void)
 
 	ret = request_irq(geiger_irq, geiger_isr, IRQF_TRIGGER_RISING, "krad#geiger", NULL);
 
-	if(ret) {
+	if(ret)
+	{
 		printk(KERN_ERR "Unable to request IRQ: %d\n", ret);
 		goto fail2;
 	}
 
 	ret = hwrng_register(&geiger_rng);
 
-	if(ret) {
+	if(ret)
+	{
 		printk(KERN_ERR "Unable to register hardware RNG device: %d\n", ret);
 		goto fail3;
 	}
@@ -246,6 +262,9 @@ static void __exit krad_exit(void)
 	
 	// unregister
 	gpio_free(geiger_pulse_pin);
+
+	//release our buffer memory
+	free_page((unsigned long) buffer);
 }
 
 MODULE_LICENSE("GPL");
