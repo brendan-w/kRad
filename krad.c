@@ -34,9 +34,12 @@ static int geiger_irq = -1;
 //circular buffer of random pulse times
 #define BUFFER_SIZE (PAGE_SIZE / sizeof(struct timespec))
 static struct timespec* buffer;
-DEFINE_SPINLOCK(pulses_lock);
-static int pulses_head = 0;
-static int pulses_tail = 0;
+static int buffer_head = 0;
+static int buffer_tail = 0;
+
+DEFINE_SPINLOCK(producer_lock); //lock for the ISR, not that it should need one...
+DEFINE_SPINLOCK(consumer_lock); //lock for hwrng API...
+
 
 
 /*
@@ -79,23 +82,9 @@ static void pulses_push(struct timespec t)
 static int geiger_data_present(struct hwrng* rng, int wait)
 {
 	int bytes = 0;
-	spin_lock(&pulses_lock);
+	spin_lock(&consumer_lock);
 	bytes = pulses_size() * sizeof(struct timespec);
-	spin_unlock(&pulses_lock);
-	return bytes;
-}
-
-//the old hwrng API
-static int geiger_data_read(struct hwrng* rng, u32 *data)
-{
-	int bytes = 0;
-	spin_lock(&pulses_lock);
-	if(pulses_size() > 0)
-	{
-		*data = (u32) pulses_pop().tv_nsec;
-		bytes = 4;
-	}
-	spin_unlock(&pulses_lock);
+	spin_unlock(&consumer_lock);
 	return bytes;
 }
 
@@ -103,7 +92,10 @@ static int geiger_data_read(struct hwrng* rng, u32 *data)
 static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
 {
 	int bytes = 0;
-	spin_lock(&pulses_lock);
+	spin_lock(&consumer_lock);
+
+    int head = smp_load_acquire(buffer_head);
+    int tail = buffer_tail;
 
 	//ensure that we have new data to give
 	if(pulses_size() > 0)
@@ -120,7 +112,9 @@ static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
 			//give them as much as we can
 			while(max_pulses > 0)
 			{
-				*output = pulses_pop();
+				*output = buffer[tail];
+                smp_store_release(buffer_tail, (tail + 1) & (BUFFER_SIZE - 1));
+
 				++output;
 				--max_pulses;
 			}
@@ -134,7 +128,7 @@ static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
 		}
 	}
 
-	spin_unlock(&pulses_lock);
+	spin_unlock(&consumer_lock);
 	return bytes;
 }
 
@@ -145,7 +139,7 @@ static struct hwrng geiger_rng = {
 	NULL,
 	geiger_data_present,
 	geiger_data_read,
-	geiger_read,
+	NULL,
 	0,
 	32
 };
@@ -160,11 +154,19 @@ static irqreturn_t geiger_isr(int irq, void *data)
 	{
 		struct timespec t = CURRENT_TIME;
 		printk(KERN_INFO "Geiger %ld seconds %ld nanoseconds \n", t.tv_sec, t.tv_nsec);
-		//TODO: spin_try_unlock, instead?
-		spin_lock(&pulses_lock);
-		if(pulses_size() < BUFFER_SIZE)
-			pulses_push(CURRENT_TIME);
-		spin_unlock(&pulses_lock);
+
+		spin_lock(&producer_lock);
+
+        int head = buffer_head;
+        int tail = ACCESS_ONCE(buffer_tail);
+
+		if(CIRC_SPACE(head, tail, BUFFER_SIZE) >= 1)
+        {
+            struct timespec* pulse = buffer[head];
+            pulse* = t;
+            smp_store_release(buffer_head, (head + 1) & (BUFFER_SIZE - 1));
+        }
+		spin_unlock(&producer_lock);
 	}
 
 	return IRQ_HANDLED;
