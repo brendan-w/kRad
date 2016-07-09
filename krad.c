@@ -51,7 +51,7 @@ static int geiger_data_present(struct hwrng* rng, int wait)
     spin_lock(&consumer_lock);
     head = ACCESS_ONCE(buffer_head);
     tail = ACCESS_ONCE(buffer_tail);
-    bytes = CIRC_CNT(head, tail, BUFFER_SIZE) * sizeof(struct timespec)
+    bytes = CIRC_CNT(head, tail, BUFFER_SIZE) * sizeof(struct timespec);
     spin_unlock(&consumer_lock);
     return bytes;
 }
@@ -64,7 +64,7 @@ static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
     int tail;
     spin_lock(&consumer_lock);
 
-    head = smp_load_acquire(buffer_head);
+    head = READ_ONCE(buffer_head);
     tail = buffer_tail;
 
     //ensure that we have new data to give
