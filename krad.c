@@ -46,7 +46,9 @@ static int geiger_data_present(struct hwrng* rng, int wait)
 {
 	int bytes = 0;
 	spin_lock(&consumer_lock);
-	bytes = pulses_size() * sizeof(struct timespec);
+    int head = ACCESS_ONCE(buffer_head);
+    int tail = ACCESS_ONCE(buffer_tail);
+    bytes = CIRC_CNT(head, tail, BUFFER_SIZE) * sizeof(struct timespec)
 	spin_unlock(&consumer_lock);
 	return bytes;
 }
@@ -163,7 +165,7 @@ static int __init krad_init(void)
 		printk(KERN_ERR "Unable to request GPIO for the Geiger Counter: %d\n", ret);
 		goto fail1;
 	}
-	
+
 	ret = gpio_to_irq(geiger_pulse_pin);
 
 	if(ret < 0)
@@ -201,7 +203,7 @@ static int __init krad_init(void)
 	// failure cases
 fail3:
 	free_irq(geiger_irq, NULL);
-fail2: 
+fail2:
 	gpio_free(geiger_pulse_pin);
 fail1:
 	return ret;
@@ -219,7 +221,7 @@ static void __exit krad_exit(void)
 
 	// free irqs
 	free_irq(geiger_irq, NULL);
-	
+
 	// unregister
 	gpio_free(geiger_pulse_pin);
 
