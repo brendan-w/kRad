@@ -58,7 +58,9 @@ static int geiger_data_present(struct hwrng* rng, int wait)
 
     size = CIRC_CNT(head, tail, BUFFER_SIZE) * sizeof(struct timespec);
 
+    #ifdef DEBUG
     printk(KERN_INFO "krad: geiger_data_present (%d bytes)", size);
+    #endif
 
     return size;
 }
@@ -70,7 +72,9 @@ static int geiger_data_read(struct hwrng* rng, u32 *data)
     int head;
     int tail;
 
+    #ifdef DEBUG
     printk(KERN_INFO "krad: geiger_data_read called\n");
+    #endif
 
     spin_lock(&consumer_lock);
 
@@ -80,7 +84,7 @@ static int geiger_data_read(struct hwrng* rng, u32 *data)
     if(CIRC_CNT(head, tail, BUFFER_SIZE) >= 1)
     {
         *data = (u32) buffer[tail].tv_nsec;
-	smp_store_release(&buffer_tail, (tail + 1) & (BUFFER_SIZE - 1));
+        smp_store_release(&buffer_tail, (tail + 1) & (BUFFER_SIZE - 1));
         bytes = 4;
     }
 
@@ -96,7 +100,9 @@ static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
     size_t p;
     size_t pulses_given;
 
+    #ifdef DEBUG
     printk(KERN_INFO "krad: geiger_read called\n");
+    #endif
 
     spin_lock(&consumer_lock);
 
@@ -109,7 +115,7 @@ static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
 
     if(!pulses_given)
     {
-        printk(KERN_INFO "krad: %s was called with max bytes smaller than the storage type\n", __func__);
+        printk(KERN_INFO "krad: %s was called with max bytes (%zu) smaller than the storage type\n", __func__, max);
     }
 
     for(p = 0; p < pulses_given; p++)
@@ -129,7 +135,7 @@ static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
 
 
 static struct hwrng geiger_rng = {
-    "Geiger Counter",
+    "krad",
     NULL,
     NULL,
     geiger_data_present,
