@@ -61,6 +61,7 @@ static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
 {
     int head;
     int tail;
+    size_t p;
     size_t pulses_given;
 
     spin_lock(&consumer_lock);
@@ -69,15 +70,15 @@ static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
     tail = buffer_tail;
 
     //figure out how much we can give them
-    pulses_given = min(max / sizeof(struct timespec),      //pulses wanted
-                         CIRC_CNT(head, tail, BUFFER_SIZE)); //pulses we have
+    pulses_given = min((size_t) max / sizeof(struct timespec),      //pulses wanted
+                       (size_t) CIRC_CNT(head, tail, BUFFER_SIZE)); //pulses we have
 
     if(!pulses_given)
     {
         printk(KERN_INFO "%s was called with max bytes smaller than the storage type\n", __func__);
     }
 
-    for(size_t p = 0; p < pulses_given; p++)
+    for(p = 0; p < pulses_given; p++)
     {
         ((struct timespec*) data)[p] = buffer[tail];
         smp_store_release(&buffer_tail, (tail + 1) & (BUFFER_SIZE - 1));
