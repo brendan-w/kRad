@@ -45,73 +45,73 @@ DEFINE_SPINLOCK(consumer_lock); //lock for hwrng API...
 
 static int geiger_data_present(struct hwrng* rng, int wait)
 {
-	int bytes = 0;
+    int bytes = 0;
     int head;
     int tail;
-	spin_lock(&consumer_lock);
+    spin_lock(&consumer_lock);
     head = ACCESS_ONCE(buffer_head);
     tail = ACCESS_ONCE(buffer_tail);
     bytes = CIRC_CNT(head, tail, BUFFER_SIZE) * sizeof(struct timespec)
-	spin_unlock(&consumer_lock);
-	return bytes;
+    spin_unlock(&consumer_lock);
+    return bytes;
 }
 
 //the new hwrng API
 static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
 {
-	int bytes = 0;
+    int bytes = 0;
     int head;
     int tail;
-	spin_lock(&consumer_lock);
+    spin_lock(&consumer_lock);
 
     head = smp_load_acquire(buffer_head);
     tail = buffer_tail;
 
-	//ensure that we have new data to give
-	if(pulses_size() > 0)
-	{
-		if(max > sizeof(struct timespec))
-		{
-			//how many entries can we give
-			int bytes_available = pulses_size() * sizeof(struct timespec);
-			int max_bytes = min((int) max, bytes_available);
-			int max_pulses = max_bytes / sizeof(struct timespec); //integer flooring
+    //ensure that we have new data to give
+    if(pulses_size() > 0)
+    {
+        if(max > sizeof(struct timespec))
+        {
+            //how many entries can we give
+            int bytes_available = pulses_size() * sizeof(struct timespec);
+            int max_bytes = min((int) max, bytes_available);
+            int max_pulses = max_bytes / sizeof(struct timespec); //integer flooring
 
-			struct timespec* output = (struct timespec*) data;
+            struct timespec* output = (struct timespec*) data;
 
-			//give them as much as we can
-			while(max_pulses > 0)
-			{
-				*output = buffer[tail];
+            //give them as much as we can
+            while(max_pulses > 0)
+            {
+                *output = buffer[tail];
                 smp_store_release(buffer_tail, (tail + 1) & (BUFFER_SIZE - 1));
 
-				++output;
-				--max_pulses;
-			}
+                ++output;
+                --max_pulses;
+            }
 
-			bytes = max_bytes;
-		}
-		else
-		{
-			//else, no implementation for smaller amounts
-			printk(KERN_INFO "%s was called with max bytes smaller than the storage type\n", __func__);
-		}
-	}
+            bytes = max_bytes;
+        }
+        else
+        {
+            //else, no implementation for smaller amounts
+            printk(KERN_INFO "%s was called with max bytes smaller than the storage type\n", __func__);
+        }
+    }
 
-	spin_unlock(&consumer_lock);
-	return bytes;
+    spin_unlock(&consumer_lock);
+    return bytes;
 }
 
 
 static struct hwrng geiger_rng = {
-	"Geiger Counter",
-	NULL,
-	NULL,
-	geiger_data_present,
-	geiger_data_read,
-	NULL,
-	0,
-	32
+    "Geiger Counter",
+    NULL,
+    NULL,
+    geiger_data_present,
+    geiger_data_read,
+    NULL,
+    0,
+    32
 };
 
 
@@ -120,26 +120,26 @@ static struct hwrng geiger_rng = {
  */
 static irqreturn_t geiger_isr(int irq, void *data)
 {
-	if(irq == geiger_irq)
-	{
-		struct timespec t = CURRENT_TIME;
-		printk(KERN_INFO "Geiger %ld seconds %ld nanoseconds \n", t.tv_sec, t.tv_nsec);
+    if(irq == geiger_irq)
+    {
+        struct timespec t = CURRENT_TIME;
+        printk(KERN_INFO "Geiger %ld seconds %ld nanoseconds \n", t.tv_sec, t.tv_nsec);
 
-		spin_lock(&producer_lock);
+        spin_lock(&producer_lock);
 
         int head = buffer_head;
         int tail = ACCESS_ONCE(buffer_tail);
 
-		if(CIRC_SPACE(head, tail, BUFFER_SIZE) >= 1)
+        if(CIRC_SPACE(head, tail, BUFFER_SIZE) >= 1)
         {
             struct timespec* pulse = buffer[head];
             pulse* = t;
             smp_store_release(buffer_head, (head + 1) & (BUFFER_SIZE - 1));
         }
-		spin_unlock(&producer_lock);
-	}
+        spin_unlock(&producer_lock);
+    }
 
-	return IRQ_HANDLED;
+    return IRQ_HANDLED;
 }
 
 /*
@@ -147,71 +147,71 @@ static irqreturn_t geiger_isr(int irq, void *data)
  */
 static int __init krad_init(void)
 {
-	int ret = 0;
+    int ret = 0;
 
-	printk(KERN_INFO "%s\n", __func__);
+    printk(KERN_INFO "%s\n", __func__);
 
-	//allocate a single page for our circular buffer
-	buffer = (struct timespec*) __get_free_page(GFP_KERNEL);
+    //allocate a single page for our circular buffer
+    buffer = (struct timespec*) __get_free_page(GFP_KERNEL);
 
-	if(!buffer)
-	{
-		printk(KERN_ERR "Not enough memory for buffer\n");
-		return ENOMEM;
-	}
+    if(!buffer)
+    {
+        printk(KERN_ERR "Not enough memory for buffer\n");
+        return ENOMEM;
+    }
 
-	printk(KERN_INFO "Allocated buffer for %lu pulses\n", BUFFER_SIZE);
+    printk(KERN_INFO "Allocated buffer for %lu pulses\n", BUFFER_SIZE);
 
-	// register Geiger pulse gpio
-	ret = gpio_request_one(geiger_pulse_pin, GPIOF_IN, "Geiger Pulse");
+    // register Geiger pulse gpio
+    ret = gpio_request_one(geiger_pulse_pin, GPIOF_IN, "Geiger Pulse");
 
-	if(ret)
-	{
-		printk(KERN_ERR "Unable to request GPIO for the Geiger Counter: %d\n", ret);
-		goto fail1;
-	}
+    if(ret)
+    {
+        printk(KERN_ERR "Unable to request GPIO for the Geiger Counter: %d\n", ret);
+        goto fail1;
+    }
 
-	ret = gpio_to_irq(geiger_pulse_pin);
+    ret = gpio_to_irq(geiger_pulse_pin);
 
-	if(ret < 0)
-	{
-		printk(KERN_ERR "Unable to request IRQ: %d\n", ret);
-		goto fail2;
-	}
+    if(ret < 0)
+    {
+        printk(KERN_ERR "Unable to request IRQ: %d\n", ret);
+        goto fail2;
+    }
 
-	geiger_irq = ret;
+    geiger_irq = ret;
 
-	printk(KERN_INFO "Successfully requested Geiger Pulse IRQ # %d\n", geiger_irq);
+    printk(KERN_INFO "Successfully requested Geiger Pulse IRQ # %d\n", geiger_irq);
 
-	ret = request_irq(geiger_irq, geiger_isr, IRQF_TRIGGER_RISING, "krad#geiger", NULL);
+    ret = request_irq(geiger_irq, geiger_isr, IRQF_TRIGGER_RISING, "krad#geiger", NULL);
 
-	if(ret)
-	{
-		printk(KERN_ERR "Unable to request IRQ: %d\n", ret);
-		goto fail2;
-	}
+    if(ret)
+    {
+        printk(KERN_ERR "Unable to request IRQ: %d\n", ret);
+        goto fail2;
+    }
 
-	ret = hwrng_register(&geiger_rng);
+    ret = hwrng_register(&geiger_rng);
 
-	if(ret)
-	{
-		printk(KERN_ERR "Unable to register hardware RNG device: %d\n", ret);
-		goto fail3;
-	}
+    if(ret)
+    {
+        printk(KERN_ERR "Unable to register hardware RNG device: %d\n", ret);
+        goto fail3;
+    }
 
-	printk(KERN_INFO "Successfully registered new hardware RNG device\n");
+    printk(KERN_INFO "Successfully registered new hardware RNG device\n");
 
-	// finished successfully
-	return 0;
+    // finished successfully
+    return 0;
 
 
-	// failure cases
+    // failure cases
 fail3:
-	free_irq(geiger_irq, NULL);
+    free_irq(geiger_irq, NULL);
 fail2:
-	gpio_free(geiger_pulse_pin);
+    gpio_free(geiger_pulse_pin);
 fail1:
-	return ret;
+    return ret;
 }
 
 /**
@@ -219,19 +219,19 @@ fail1:
  */
 static void __exit krad_exit(void)
 {
-	printk(KERN_INFO "%s\n", __func__);
+    printk(KERN_INFO "%s\n", __func__);
 
-	// unregister the hwrng
-	hwrng_unregister(&geiger_rng);
+    // unregister the hwrng
+    hwrng_unregister(&geiger_rng);
 
-	// free irqs
-	free_irq(geiger_irq, NULL);
+    // free irqs
+    free_irq(geiger_irq, NULL);
 
-	// unregister
-	gpio_free(geiger_pulse_pin);
+    // unregister
+    gpio_free(geiger_pulse_pin);
 
-	//release our buffer memory
-	free_page((unsigned long) buffer);
+    //release our buffer memory
+    free_page((unsigned long) buffer);
 }
 
 MODULE_LICENSE("GPL");
