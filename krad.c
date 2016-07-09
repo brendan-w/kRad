@@ -49,22 +49,54 @@ static int geiger_data_present(struct hwrng* rng, int wait)
 {
     int head;
     int tail;
+    int size;
 
     spin_lock(&consumer_lock);
     head = smp_load_acquire(&buffer_head);
     tail = buffer_tail;
     spin_unlock(&consumer_lock);
 
-    return CIRC_CNT(head, tail, BUFFER_SIZE) * sizeof(struct timespec);
+    size = CIRC_CNT(head, tail, BUFFER_SIZE) * sizeof(struct timespec);
+
+    printk(KERN_INFO "krad: geiger_data_present (%d bytes)", size);
+
+    return size;
 }
 
+//the old hwrng API
+static int geiger_data_read(struct hwrng* rng, u32 *data)
+{
+    int bytes = 0;
+    int head;
+    int tail;
 
+    printk(KERN_INFO "krad: geiger_data_read called\n");
+
+    spin_lock(&consumer_lock);
+
+    head = smp_load_acquire(&buffer_head);
+    tail = buffer_tail;
+
+    if(CIRC_CNT(head, tail, BUFFER_SIZE) >= 1)
+    {
+        *data = (u32) buffer[tail].tv_nsec;
+	smp_store_release(&buffer_tail, (tail + 1) & (BUFFER_SIZE - 1));
+        bytes = 4;
+    }
+
+    spin_unlock(&consumer_lock);
+    return bytes;
+}
+
+//the new hwrng API
 static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
 {
     int head;
     int tail;
     size_t p;
     size_t pulses_given;
+
+    printk(KERN_INFO "krad: geiger_read called\n");
 
     spin_lock(&consumer_lock);
 
@@ -101,7 +133,7 @@ static struct hwrng geiger_rng = {
     NULL,
     NULL,
     geiger_data_present,
-    NULL,
+    geiger_data_read,
     geiger_read,
     0,
     32
