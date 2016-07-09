@@ -39,70 +39,53 @@ static int buffer_head = 0;
 static int buffer_tail = 0;
 
 DEFINE_SPINLOCK(producer_lock); //lock for the ISR, not that it should need one...
-DEFINE_SPINLOCK(consumer_lock); //lock for hwrng API...
+DEFINE_SPINLOCK(consumer_lock); //lock for hwrng API
 
 
 
 static int geiger_data_present(struct hwrng* rng, int wait)
 {
-    int bytes = 0;
     int head;
     int tail;
+
     spin_lock(&consumer_lock);
-    head = ACCESS_ONCE(buffer_head);
-    tail = ACCESS_ONCE(buffer_tail);
-    bytes = CIRC_CNT(head, tail, BUFFER_SIZE) * sizeof(struct timespec);
+    head = smp_load_acquire(&buffer_head);
+    tail = buffer_tail;
     spin_unlock(&consumer_lock);
-    return bytes;
+
+    return CIRC_CNT(head, tail, BUFFER_SIZE) * sizeof(struct timespec);
 }
 
-//the new hwrng API
+
 static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
 {
-    int bytes = 0;
     int head;
     int tail;
-    int size;
+    size_t pulses_given;
 
     spin_lock(&consumer_lock);
 
     head = smp_load_acquire(&buffer_head);
     tail = buffer_tail;
-    size = CIRC_CNT(head, tail, BUFFER_SIZE);
 
-    //ensure that we have new data to give
-    if(size > 0)
+    //figure out how much we can give them
+    pulses_given = min(max / sizeof(struct timespec),      //pulses wanted
+                         CIRC_CNT(head, tail, BUFFER_SIZE)); //pulses we have
+
+    if(!pulses_given)
     {
-        if(max > sizeof(struct timespec))
-        {
-            //how many entries can we give
-            int bytes_available = size * sizeof(struct timespec);
-            int max_bytes = min((int) max, bytes_available);
-            int max_pulses = max_bytes / sizeof(struct timespec); //integer flooring
+        printk(KERN_INFO "%s was called with max bytes smaller than the storage type\n", __func__);
+    }
 
-            struct timespec* output = (struct timespec*) data;
-
-            //give them as much as we can
-            while(max_pulses > 0)
-            {
-                *output = buffer[tail];
-                smp_store_release(&buffer_tail, (tail + 1) & (BUFFER_SIZE - 1));
-
-                ++output;
-                --max_pulses;
-            }
-
-            bytes = max_bytes;
-        }
-        else
-        {
-            //else, no implementation for smaller amounts
-            printk(KERN_INFO "%s was called with max bytes smaller than the storage type\n", __func__);
-        }
+    for(size_t p = 0; p < pulses_given; p++)
+    {
+        ((struct timespec*) data)[p] = buffer[tail];
+        smp_store_release(&buffer_tail, (tail + 1) & (BUFFER_SIZE - 1));
     }
 
     spin_unlock(&consumer_lock);
-    return bytes;
+
+    return pulses_given * sizeof(struct timespec);
 }
 
 
