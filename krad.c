@@ -62,18 +62,21 @@ static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
     int bytes = 0;
     int head;
     int tail;
+    int size;
+
     spin_lock(&consumer_lock);
 
-    head = READ_ONCE(buffer_head);
+    head = smp_load_acquire(&buffer_head);
     tail = buffer_tail;
+    size = CIRC_CNT(head, tail, BUFFER_SIZE);
 
     //ensure that we have new data to give
-    if(pulses_size() > 0)
+    if(size > 0)
     {
         if(max > sizeof(struct timespec))
         {
             //how many entries can we give
-            int bytes_available = pulses_size() * sizeof(struct timespec);
+            int bytes_available = size * sizeof(struct timespec);
             int max_bytes = min((int) max, bytes_available);
             int max_pulses = max_bytes / sizeof(struct timespec); //integer flooring
 
@@ -83,7 +86,7 @@ static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
             while(max_pulses > 0)
             {
                 *output = buffer[tail];
-                smp_store_release(buffer_tail, (tail + 1) & (BUFFER_SIZE - 1));
+                smp_store_release(&buffer_tail, (tail + 1) & (BUFFER_SIZE - 1));
 
                 ++output;
                 --max_pulses;
@@ -108,8 +111,8 @@ static struct hwrng geiger_rng = {
     NULL,
     NULL,
     geiger_data_present,
-    geiger_data_read,
     NULL,
+    geiger_read,
     0,
     32
 };
@@ -123,18 +126,19 @@ static irqreturn_t geiger_isr(int irq, void *data)
     if(irq == geiger_irq)
     {
         struct timespec t = CURRENT_TIME;
+        int head;
+        int tail;
         printk(KERN_INFO "Geiger %ld seconds %ld nanoseconds \n", t.tv_sec, t.tv_nsec);
 
         spin_lock(&producer_lock);
 
-        int head = buffer_head;
-        int tail = ACCESS_ONCE(buffer_tail);
+        head = buffer_head;
+        tail = ACCESS_ONCE(buffer_tail);
 
         if(CIRC_SPACE(head, tail, BUFFER_SIZE) >= 1)
         {
-            struct timespec* pulse = buffer[head];
-            pulse* = t;
-            smp_store_release(buffer_head, (head + 1) & (BUFFER_SIZE - 1));
+            buffer[head] = t;
+            smp_store_release(&buffer_head, (head + 1) & (BUFFER_SIZE - 1));
         }
         spin_unlock(&producer_lock);
     }
