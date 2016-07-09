@@ -24,6 +24,7 @@
 #include <linux/hw_random.h>
 #include <linux/spinlock.h>
 #include <linux/gfp.h>
+#include <linux/circ_buf.h>
 
 /* Define a GPIO for the Geiger counter */
 static int geiger_pulse_pin = 3;
@@ -45,9 +46,11 @@ DEFINE_SPINLOCK(consumer_lock); //lock for hwrng API...
 static int geiger_data_present(struct hwrng* rng, int wait)
 {
 	int bytes = 0;
+    int head;
+    int tail;
 	spin_lock(&consumer_lock);
-    int head = ACCESS_ONCE(buffer_head);
-    int tail = ACCESS_ONCE(buffer_tail);
+    head = ACCESS_ONCE(buffer_head);
+    tail = ACCESS_ONCE(buffer_tail);
     bytes = CIRC_CNT(head, tail, BUFFER_SIZE) * sizeof(struct timespec)
 	spin_unlock(&consumer_lock);
 	return bytes;
@@ -57,10 +60,12 @@ static int geiger_data_present(struct hwrng* rng, int wait)
 static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
 {
 	int bytes = 0;
+    int head;
+    int tail;
 	spin_lock(&consumer_lock);
 
-    int head = smp_load_acquire(buffer_head);
-    int tail = buffer_tail;
+    head = smp_load_acquire(buffer_head);
+    tail = buffer_tail;
 
 	//ensure that we have new data to give
 	if(pulses_size() > 0)
