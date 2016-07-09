@@ -26,6 +26,8 @@
 #include <linux/gfp.h>
 #include <linux/circ_buf.h>
 
+#define DEBUG 1
+
 /* Define a GPIO for the Geiger counter */
 static int geiger_pulse_pin = 3;
 
@@ -75,11 +77,15 @@ static int geiger_read(struct hwrng* rng, void* data, size_t max, bool wait)
 
     if(!pulses_given)
     {
-        printk(KERN_INFO "%s was called with max bytes smaller than the storage type\n", __func__);
+        printk(KERN_INFO "krad: %s was called with max bytes smaller than the storage type\n", __func__);
     }
 
     for(p = 0; p < pulses_given; p++)
     {
+        #ifdef DEBUG
+        printk(KERN_INFO "krad: dispensed pulse: %ld seconds %ld nanoseconds \n", buffer[tail].tv_sec, buffer[tail].tv_nsec);
+        #endif
+
         ((struct timespec*) data)[p] = buffer[tail];
         smp_store_release(&buffer_tail, (tail + 1) & (BUFFER_SIZE - 1));
     }
@@ -112,7 +118,10 @@ static irqreturn_t geiger_isr(int irq, void *data)
         struct timespec t = CURRENT_TIME;
         int head;
         int tail;
-        printk(KERN_INFO "Geiger %ld seconds %ld nanoseconds \n", t.tv_sec, t.tv_nsec);
+
+        #ifdef DEBUG
+        printk(KERN_INFO "krad: acquired pulse: %ld seconds %ld nanoseconds \n", t.tv_sec, t.tv_nsec);
+        #endif
 
         spin_lock(&producer_lock);
 
@@ -124,6 +133,7 @@ static irqreturn_t geiger_isr(int irq, void *data)
             buffer[head] = t;
             smp_store_release(&buffer_head, (head + 1) & (BUFFER_SIZE - 1));
         }
+
         spin_unlock(&producer_lock);
     }
 
@@ -137,25 +147,21 @@ static int __init krad_init(void)
 {
     int ret = 0;
 
-    printk(KERN_INFO "%s\n", __func__);
-
     //allocate a single page for our circular buffer
     buffer = (struct timespec*) __get_free_page(GFP_KERNEL);
 
     if(!buffer)
     {
-        printk(KERN_ERR "Not enough memory for buffer\n");
+        printk(KERN_ERR "krad: Not enough memory for buffer\n");
         return ENOMEM;
     }
-
-    printk(KERN_INFO "Allocated buffer for %lu pulses\n", BUFFER_SIZE);
 
     // register Geiger pulse gpio
     ret = gpio_request_one(geiger_pulse_pin, GPIOF_IN, "Geiger Pulse");
 
     if(ret)
     {
-        printk(KERN_ERR "Unable to request GPIO for the Geiger Counter: %d\n", ret);
+        printk(KERN_ERR "krad: Unable to request GPIO for the Geiger Counter: %d\n", ret);
         goto fail1;
     }
 
@@ -163,19 +169,17 @@ static int __init krad_init(void)
 
     if(ret < 0)
     {
-        printk(KERN_ERR "Unable to request IRQ: %d\n", ret);
+        printk(KERN_ERR "krad: Unable to request IRQ: %d\n", ret);
         goto fail2;
     }
 
     geiger_irq = ret;
 
-    printk(KERN_INFO "Successfully requested Geiger Pulse IRQ # %d\n", geiger_irq);
-
     ret = request_irq(geiger_irq, geiger_isr, IRQF_TRIGGER_RISING, "krad#geiger", NULL);
 
     if(ret)
     {
-        printk(KERN_ERR "Unable to request IRQ: %d\n", ret);
+        printk(KERN_ERR "krad: Unable to request IRQ: %d\n", ret);
         goto fail2;
     }
 
@@ -183,11 +187,11 @@ static int __init krad_init(void)
 
     if(ret)
     {
-        printk(KERN_ERR "Unable to register hardware RNG device: %d\n", ret);
+        printk(KERN_ERR "krad: Unable to register hardware RNG device: %d\n", ret);
         goto fail3;
     }
 
-    printk(KERN_INFO "Successfully registered new hardware RNG device\n");
+    printk(KERN_INFO "krad: started (buffer size %lu pulses)\n", BUFFER_SIZE);
 
     // finished successfully
     return 0;
@@ -207,8 +211,6 @@ fail1:
  */
 static void __exit krad_exit(void)
 {
-    printk(KERN_INFO "%s\n", __func__);
-
     // unregister the hwrng
     hwrng_unregister(&geiger_rng);
 
@@ -220,6 +222,8 @@ static void __exit krad_exit(void)
 
     //release our buffer memory
     free_page((unsigned long) buffer);
+
+    printk(KERN_INFO "krad: stopped\n");
 }
 
 MODULE_LICENSE("GPL");
